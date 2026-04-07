@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 4.0)
+project(noise_catcher)
+
+set(CMAKE_CXX_STANDARD 23)
+include(FetchContent)
+FetchContent_Declare(matplotplusplus
+        GIT_REPOSITORY https://github.com/alandefreitas/matplotplusplus
+        GIT_TAG origin/master) # or whatever tag you want
+FetchContent_GetProperties(matplotplusplus)
+if(NOT matplotplusplus_POPULATED)
+    FetchContent_MakeAvailable(matplotplusplus)
+endif()
+
+add_executable(noise_catcher main.cpp)
+target_link_libraries(noise_catcher PUBLIC matplot)

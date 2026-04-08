@@ -10,6 +10,16 @@ FetchContent_GetProperties(matplotplusplus)
 if(NOT matplotplusplus_POPULATED)
     FetchContent_MakeAvailable(matplotplusplus)
 endif()
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
+FetchContent_Declare(portaudio
+        GIT_REPOSITORY https://github.com/PortAudio/portaudio
+        GIT_TAG origin/master) # or whatever tag you want
+FetchContent_GetProperties(portaudio)
+if(NOT portaudio_POPULATED)
+    FetchContent_MakeAvailable(portaudio)
+endif()
 
 add_executable(noise_catcher main.cpp)
-target_link_libraries(noise_catcher PUBLIC matplot)
+target_link_libraries(noise_catcher PUBLIC matplot portaudio m rt asound jack Threads::Threads)

@@ -1,110 +1,109 @@
 
-#include <cstdlib>
 #include <iostream>
 #include <portaudio.h>
 
 #define SAMPLE_RATE  (44100)
 #define FRAMES_PER_BUFFER (512)
-#define NUM_SECONDS     (5)
+#define NUM_SECONDS     (10)
+#define NUM_OF_SAMPLES (NUM_SECONDS * SAMPLE_RATE)
 #define NUM_CHANNELS    (2)
-/* #define DITHER_FLAG     (paDitherOff) */
-#define DITHER_FLAG     (0) 
-#define WRITE_TO_FILE   (0)
 #define PA_SAMPLE_TYPE  paFloat32
 typedef float SAMPLE;
 #define SAMPLE_SILENCE  (0.0f)
-#define PRINTF_S_FORMAT "%.8f"
 
-typedef struct
+typedef struct {
+    SAMPLE left;
+    SAMPLE right;
+} channel;
+
+
+struct paTestData
 {
-    int          frameIndex;  /* Index into sample array. */
-    int          maxFrameIndex;
-    SAMPLE      *recordedSamples;
-}
-paTestData;
+    int          frameIndex = 0;  /* Index into sample array. */
+    int          maxFrameIndex = NUM_OF_SAMPLES;
+    std::array<channel, NUM_OF_SAMPLES> recordedSamples{};
 
-/* This routine will be called by the PortAudio engine when audio is needed.
-** It may be called at interrupt level on some machines so don't do anything
-** that could mess up the system like calling malloc() or free().
-*/
-static int recordCallback( const void *inputBuffer, void *outputBuffer,
-                           unsigned long framesPerBuffer,
-                           const PaStreamCallbackTimeInfo* timeInfo,
-                           PaStreamCallbackFlags statusFlags,
-                           void *userData )
-{
-    paTestData *data = (paTestData*)userData;
-    const SAMPLE *rptr = (const SAMPLE*)inputBuffer;
-    SAMPLE *wptr = &data->recordedSamples[data->frameIndex * NUM_CHANNELS];
-    long framesToCalc;
-    long i;
-    int finished;
-    unsigned long framesLeft = data->maxFrameIndex - data->frameIndex;
+};
 
-    (void) outputBuffer; /* Prevent unused variable warnings. */
-    (void) timeInfo;
-    (void) statusFlags;
-    (void) userData;
 
+
+static unsigned long get_frames_left(unsigned long framesPerBuffer, paTestData *data) {
+    auto framesLeft = data->maxFrameIndex - data->frameIndex;
     if( framesLeft < framesPerBuffer )
     {
-        framesToCalc = framesLeft;
-        finished = paComplete;
+        data->frameIndex = 0;
+        return framesLeft;
     }
-    else
-    {
-        framesToCalc = framesPerBuffer;
-        finished = paContinue;
-    }
+    return framesPerBuffer;
+
+}
+
+static int recordCallback( const void *inputBuffer, void *,
+                           unsigned long framesPerBuffer,
+                           const PaStreamCallbackTimeInfo*,
+                           PaStreamCallbackFlags ,
+                           void *userData){
+    auto *data = static_cast<paTestData *>(userData);
+    const auto *rptr = static_cast<const SAMPLE *>(inputBuffer);
+
+    auto framesToCalc = get_frames_left(framesPerBuffer, data);
 
     if(!inputBuffer)
     {
-        for( i=0; i<framesToCalc; i++ )
+        for(int i=0; i<framesToCalc; i++ )
         {
-            *wptr++ = SAMPLE_SILENCE;  /* left */
-            if( NUM_CHANNELS == 2 ) *wptr++ = SAMPLE_SILENCE;  /* right */
+            auto wptr = data->recordedSamples[data->frameIndex];
+            wptr.left = SAMPLE_SILENCE;
+            wptr.right =  SAMPLE_SILENCE;  /* right */
+            data->recordedSamples[data->frameIndex++] = wptr;
         }
     }
     else
     {
-        for( i=0; i<framesToCalc; i++ )
-        {
-            *wptr++ = *rptr++;  /* left */
-            if( NUM_CHANNELS == 2 ) *wptr++ = *rptr++;  /* right */
+        for(int i=0; i<framesToCalc; i++ ){
+            auto wptr = data->recordedSamples[data->frameIndex];
+            wptr.left = *rptr++;  /* left */
+            wptr.right= *rptr++;  /* right */
+            data->recordedSamples[data->frameIndex++] = wptr;
+            // std::cout << wptr.left << " " << wptr.right << std::endl;
         }
     }
-    data->frameIndex += framesToCalc;
-    return finished;
+    return paContinue;
+}
+
+void calculate_max_avg(const paTestData &data) {
+    double average, val;
+    double max = val = average = 0.0;
+    ;
+    for( int i=0; i< NUM_OF_SAMPLES; i++ )
+    {
+
+        val = (std::abs(data.recordedSamples[i].left) + std::abs(data.recordedSamples[i].right)) / 2.0;
+
+        if( val > max )
+        {
+            max = val;
+        }
+        average += val;
+    }
+
+    average = average / static_cast<double>(NUM_OF_SAMPLES);
+
+    std::cout << "sample max amplitude =" << max << std::endl;
+    std::cout << "sample average =" << average << std::endl;
+
 }
 
 /*******************************************************************/
 int main()
 {
-    PaStreamParameters  inputParameters,
-                        outputParameters;
-    PaStream*           stream;
-    PaError             err = paNoError;
-    paTestData          data;
-    int                 i;
-    int                 totalFrames;
-    int                 numSamples;
-    int                 numBytes;
-    SAMPLE              max, val;
-    double              average;
-    
-    data.maxFrameIndex = totalFrames = NUM_SECONDS * SAMPLE_RATE; /* Record for a few seconds. */
-    data.frameIndex = 0;
-    numSamples = totalFrames * NUM_CHANNELS;
-    numBytes = numSamples * sizeof(SAMPLE);
-    data.recordedSamples = (SAMPLE *) std::malloc( numBytes ); /* From now on, recordedSamples is initialised. */
-    if( data.recordedSamples == nullptr )
-    {
-        std::cout<<"Could not allocate record array.\n";
-        goto done;
-    }
-    for( i=0; i<numSamples; i++ ) data.recordedSamples[i] = 0;
+    PaStreamParameters  inputParameters;
 
-    err = Pa_Initialize();
+    paTestData data;
+  /* From now on, recordedSamples is initialised. */
+
+
+    auto err = Pa_Initialize();
     if( err != paNoError ) goto done;
 
     inputParameters.device = Pa_GetDefaultInputDevice(); /* default input device */
@@ -118,6 +117,7 @@ int main()
     inputParameters.hostApiSpecificStreamInfo = nullptr;
 
     /* Record some audio. -------------------------------------------- */
+    PaStream*           stream;
     err = Pa_OpenStream(
               &stream,
               &inputParameters,
@@ -135,8 +135,11 @@ int main()
 
     while( ( err = Pa_IsStreamActive( stream ) ) == 1 )
     {
-        Pa_Sleep(1000);
-        printf("index = %d\n", data.frameIndex ); fflush(stdout);
+        Pa_Sleep(100);
+        printf("index = %d\n", data.frameIndex );
+        calculate_max_avg(data);
+
+
     }
     if( err < 0 ) goto done;
 
@@ -144,29 +147,11 @@ int main()
     if( err != paNoError ) goto done;
 
     /* Measure maximum peak amplitude. */
-    max = 0;
-    average = 0.0;
-    for( i=0; i<numSamples; i++ )
-    {
-        val = data.recordedSamples[i];
-        if( val < 0 ) val = -val; /* ABS */
-        if( val > max )
-        {
-            max = val;
-        }
-        average += val;
-    }
 
-    average = average / (double)numSamples;
-
-    printf("sample max amplitude = \"%f\"\n", max );
-    printf("sample average = %lf\n", average );
-    
 
 done:
     Pa_Terminate();
-    if( data.recordedSamples )       /* Sure it is nullptr or valid. */
-        free( data.recordedSamples );
+
     if( err != paNoError )
     {
         fprintf( stderr, "An error occurred while using the portaudio stream\n" );

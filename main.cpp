@@ -1,14 +1,16 @@
 
 #include <iostream>
 #include <portaudio.h>
+#include<matplot/matplot.h>
+
 
 #define SAMPLE_RATE  (44100)
 #define FRAMES_PER_BUFFER (512)
 #define NUM_SECONDS     (10)
 #define NUM_OF_SAMPLES (NUM_SECONDS * SAMPLE_RATE)
 #define NUM_CHANNELS    (2)
-#define PA_SAMPLE_TYPE  paFloat32
-typedef float SAMPLE;
+#define PA_SAMPLE_TYPE  paInt8
+typedef int8_t SAMPLE;
 #define SAMPLE_SILENCE  (0.0f)
 
 typedef struct {
@@ -29,7 +31,7 @@ struct paTestData
 
 static unsigned long get_frames_left(unsigned long framesPerBuffer, paTestData *data) {
     auto framesLeft = data->maxFrameIndex - data->frameIndex;
-    if( framesLeft < framesPerBuffer )
+    if( framesLeft <= framesPerBuffer )
     {
         data->frameIndex = 0;
         return framesLeft;
@@ -72,13 +74,13 @@ static int recordCallback( const void *inputBuffer, void *,
 }
 
 void calculate_max_avg(const paTestData &data) {
-    double average, val;
-    double max = val = average = 0.0;
+    int average, val;
+    int max = val = average = 0;
     ;
     for( int i=0; i< NUM_OF_SAMPLES; i++ )
     {
 
-        val = (std::abs(data.recordedSamples[i].left) + std::abs(data.recordedSamples[i].right)) / 2.0;
+        val = (std::abs(data.recordedSamples[i].left) + std::abs(data.recordedSamples[i].right)) / 2;
 
         if( val > max )
         {
@@ -90,16 +92,26 @@ void calculate_max_avg(const paTestData &data) {
     average = average / static_cast<double>(NUM_OF_SAMPLES);
 
     std::cout << "sample max amplitude =" << max << std::endl;
-    std::cout << "sample average =" << average << std::endl;
+    std::cout << "sample average =" <<  average << std::endl;
 
 }
 
 /*******************************************************************/
 int main()
 {
-    PaStreamParameters  inputParameters;
 
+    PaStreamParameters  inputParameters;
     paTestData data;
+    std::array<SAMPLE, NUM_OF_SAMPLES> left{}, right {};
+    auto x = matplot::linspace(0, NUM_OF_SAMPLES);
+    auto f = matplot::figure<>(false);
+    f->backend()->run_command("unset warnings");
+    auto aux = f->current_axes();
+    aux->x_axis().visible(false);
+    aux->xlim({0, NUM_OF_SAMPLES});
+    aux->ylim({-128, 127});
+
+
   /* From now on, recordedSamples is initialised. */
 
 
@@ -135,11 +147,13 @@ int main()
 
     while( ( err = Pa_IsStreamActive( stream ) ) == 1 )
     {
-        Pa_Sleep(100);
+        std::transform(data.recordedSamples.begin(), data.recordedSamples.end(), left.begin(), [](auto sample){return sample.left;});
+        std::transform(data.recordedSamples.begin(), data.recordedSamples.end(), right.begin(), [](auto sample){return sample.right;});
+        auto l = aux->plot(x, left, "b", x, right, "r" );
+        std::cout << *std::ranges::min_element(left) << "\n";
         printf("index = %d\n", data.frameIndex );
         calculate_max_avg(data);
-
-
+        Pa_Sleep(10);
     }
     if( err < 0 ) goto done;
 

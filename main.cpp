@@ -2,43 +2,28 @@
 #include <iostream>
 #include <portaudio.h>
 #include<matplot/matplot.h>
-
+#include <boost/circular_buffer.hpp>
 
 #define SAMPLE_RATE  (44100)
 #define FRAMES_PER_BUFFER (512)
-#define NUM_SECONDS     (10)
+#define NUM_SECONDS     (1)
 #define NUM_OF_SAMPLES (NUM_SECONDS * SAMPLE_RATE)
 #define NUM_CHANNELS    (2)
 #define PA_SAMPLE_TYPE  paInt8
+#define SAMPLE_SILENCE  (0)
+#define throw_if_error(err) \
+    if(err != paNoError ) {throw std::runtime_error(#err "Error: " + std::string(Pa_GetErrorText( err ))) ;}
+
 typedef int8_t SAMPLE;
-#define SAMPLE_SILENCE  (0.0f)
-
-typedef struct {
-    SAMPLE left;
-    SAMPLE right;
-} channel;
-
-
 struct paTestData
 {
-    int          frameIndex = 0;  /* Index into sample array. */
-    int          maxFrameIndex = NUM_OF_SAMPLES;
-    std::array<channel, NUM_OF_SAMPLES> recordedSamples{};
+    boost::circular_buffer <SAMPLE> left_samples {FRAMES_PER_BUFFER};
+    boost::circular_buffer <SAMPLE> right_samples {FRAMES_PER_BUFFER};
 
 };
 
 
 
-static unsigned long get_frames_left(unsigned long framesPerBuffer, paTestData *data) {
-    auto framesLeft = data->maxFrameIndex - data->frameIndex;
-    if( framesLeft <= framesPerBuffer )
-    {
-        data->frameIndex = 0;
-        return framesLeft;
-    }
-    return framesPerBuffer;
-
-}
 
 static int recordCallback( const void *inputBuffer, void *,
                            unsigned long framesPerBuffer,
@@ -48,130 +33,89 @@ static int recordCallback( const void *inputBuffer, void *,
     auto *data = static_cast<paTestData *>(userData);
     const auto *rptr = static_cast<const SAMPLE *>(inputBuffer);
 
-    auto framesToCalc = get_frames_left(framesPerBuffer, data);
 
     if(!inputBuffer)
     {
-        for(int i=0; i<framesToCalc; i++ )
+        for(int i=0; i<framesPerBuffer; i++ )
         {
-            auto wptr = data->recordedSamples[data->frameIndex];
-            wptr.left = SAMPLE_SILENCE;
-            wptr.right =  SAMPLE_SILENCE;  /* right */
-            data->recordedSamples[data->frameIndex++] = wptr;
+            data->left_samples.push_back(SAMPLE_SILENCE);
+            data->right_samples.push_back(SAMPLE_SILENCE);
         }
     }
     else
     {
-        for(int i=0; i<framesToCalc; i++ ){
-            auto wptr = data->recordedSamples[data->frameIndex];
-            wptr.left = *rptr++;  /* left */
-            wptr.right= *rptr++;  /* right */
-            data->recordedSamples[data->frameIndex++] = wptr;
+        for(int i=0; i<framesPerBuffer; i++ ){
+            data->left_samples.push_back(*rptr++);
+            data->right_samples.push_back(*rptr++);
             // std::cout << wptr.left << " " << wptr.right << std::endl;
         }
     }
     return paContinue;
 }
 
-void calculate_max_avg(const paTestData &data) {
-    int average, val;
-    int max = val = average = 0;
-    ;
-    for( int i=0; i< NUM_OF_SAMPLES; i++ )
-    {
-
-        val = (std::abs(data.recordedSamples[i].left) + std::abs(data.recordedSamples[i].right)) / 2;
-
-        if( val > max )
-        {
-            max = val;
-        }
-        average += val;
-    }
-
-    average = average / static_cast<double>(NUM_OF_SAMPLES);
-
-    std::cout << "sample max amplitude =" << max << std::endl;
-    std::cout << "sample average =" <<  average << std::endl;
-
-}
 
 /*******************************************************************/
-int main()
-{
+int main(){
 
-    PaStreamParameters  inputParameters;
-    paTestData data;
-    std::array<SAMPLE, NUM_OF_SAMPLES> left{}, right {};
-    auto x = matplot::linspace(0, NUM_OF_SAMPLES);
-    auto f = matplot::figure<>(false);
-    f->backend()->run_command("unset warnings");
-    auto aux = f->current_axes();
-    aux->x_axis().visible(false);
-    aux->xlim({0, NUM_OF_SAMPLES});
-    aux->ylim({-128, 127});
+    try {
 
-
-  /* From now on, recordedSamples is initialised. */
+        auto x = matplot::linspace(0, FRAMES_PER_BUFFER);
+        auto f = matplot::figure<>(false);
+        f->backend()->run_command("unset warnings");
+        auto aux = f->current_axes();
+        aux->x_axis().visible(false);
+        aux->y_axis().visible(false);
+        aux->xlim({0, FRAMES_PER_BUFFER});
+        aux->ylim({-128, 127});
 
 
-    auto err = Pa_Initialize();
-    if( err != paNoError ) goto done;
+        /* From now on, recordedSamples is initialised. */
 
-    inputParameters.device = Pa_GetDefaultInputDevice(); /* default input device */
-    if (inputParameters.device == paNoDevice) {
-        fprintf(stderr,"Error: No default input device.\n");
-        goto done;
+
+        auto err = Pa_Initialize();
+        throw_if_error(err)
+        PaStreamParameters  inputParameters;
+        inputParameters.device = Pa_GetDefaultInputDevice(); /* default input device */
+        inputParameters.channelCount = NUM_CHANNELS;
+        inputParameters.sampleFormat = PA_SAMPLE_TYPE;
+        inputParameters.suggestedLatency = Pa_GetDeviceInfo( inputParameters.device )->defaultLowInputLatency;
+        inputParameters.hostApiSpecificStreamInfo = nullptr;
+
+        /* Record some audio. -------------------------------------------- */
+        PaStream*           stream;
+        paTestData data;
+        err = Pa_OpenStream(
+                  &stream,
+                  &inputParameters,
+                  nullptr,                  /* &outputParameters, */
+                  SAMPLE_RATE,
+                  FRAMES_PER_BUFFER,
+                  paClipOff,      /* we won't output out of range samples so don't bother clipping them */
+                  recordCallback,
+                  &data );
+        throw_if_error(err);
+
+        err = Pa_StartStream( stream );
+        throw_if_error(err);
+        std::cout << "\n=== Now recording!! Please speak into the microphone. ===\n" << std::endl;
+        while( ( err = Pa_IsStreamActive( stream ) ) == 1 )
+        {
+            Pa_Sleep(150);
+            aux->plot(x, data.left_samples , "b", x, data.right_samples, "r" );
+        }
+        throw_if_error(err);
+
+        err = Pa_CloseStream( stream );
+        throw_if_error(err);
+
+        /* Measure maximum peak amplitude. */
+
+        err = Pa_Terminate();
+        throw_if_error(err);
+        return 0;
+    } catch (std::runtime_error &e)  {
+        std::cerr << "An error occurred while using the portaudio stream" << std::endl;
+        std::cerr << "Error number" << e.what();
+        return -1;/* Always return 0 or 1, but no other return codes. */
     }
-    inputParameters.channelCount = NUM_CHANNELS;
-    inputParameters.sampleFormat = PA_SAMPLE_TYPE;
-    inputParameters.suggestedLatency = Pa_GetDeviceInfo( inputParameters.device )->defaultLowInputLatency;
-    inputParameters.hostApiSpecificStreamInfo = nullptr;
-
-    /* Record some audio. -------------------------------------------- */
-    PaStream*           stream;
-    err = Pa_OpenStream(
-              &stream,
-              &inputParameters,
-              nullptr,                  /* &outputParameters, */
-              SAMPLE_RATE,
-              FRAMES_PER_BUFFER,
-              paClipOff,      /* we won't output out of range samples so don't bother clipping them */
-              recordCallback,
-              &data );
-    if( err != paNoError ) goto done;
-
-    err = Pa_StartStream( stream );
-    if( err != paNoError ) goto done;
-    printf("\n=== Now recording!! Please speak into the microphone. ===\n"); fflush(stdout);
-
-    while( ( err = Pa_IsStreamActive( stream ) ) == 1 )
-    {
-        std::transform(data.recordedSamples.begin(), data.recordedSamples.end(), left.begin(), [](auto sample){return sample.left;});
-        std::transform(data.recordedSamples.begin(), data.recordedSamples.end(), right.begin(), [](auto sample){return sample.right;});
-        auto l = aux->plot(x, left, "b", x, right, "r" );
-        std::cout << *std::ranges::min_element(left) << "\n";
-        printf("index = %d\n", data.frameIndex );
-        calculate_max_avg(data);
-        Pa_Sleep(10);
-    }
-    if( err < 0 ) goto done;
-
-    err = Pa_CloseStream( stream );
-    if( err != paNoError ) goto done;
-
-    /* Measure maximum peak amplitude. */
-
-
-done:
-    Pa_Terminate();
-
-    if( err != paNoError )
-    {
-        fprintf( stderr, "An error occurred while using the portaudio stream\n" );
-        fprintf( stderr, "Error number: %d\n", err );
-        fprintf( stderr, "Error message: %s\n", Pa_GetErrorText( err ) );
-        err = 1;          /* Always return 0 or 1, but no other return codes. */
-    }
-    return err;
 }

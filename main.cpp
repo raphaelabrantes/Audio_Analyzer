@@ -11,7 +11,7 @@
 
 #define SAMPLE_RATE  (44100)
 #define FRAMES_PER_BUFFER (512)
-#define NUM_SECONDS     (1)
+#define NUM_SECONDS     (5)
 #define NUM_OF_SAMPLES (NUM_SECONDS * SAMPLE_RATE)
 #define NUM_CHANNELS    (2)
 #define PA_SAMPLE_TYPE  paInt8
@@ -24,10 +24,15 @@
     };
 
 typedef int8_t SAMPLE;
+
+struct channels {
+    SAMPLE left;
+    SAMPLE right;
+};
+
 struct paTestData
 {
-    boost::circular_buffer <SAMPLE> left_samples {NUM_OF_SAMPLES};
-    boost::circular_buffer <SAMPLE> right_samples {NUM_OF_SAMPLES};
+    boost::circular_buffer <channels> samples {NUM_OF_SAMPLES};
 
 };
 
@@ -47,15 +52,21 @@ static int recordCallback( const void *inputBuffer, void *,
     {
         for(int i=0; i<framesPerBuffer; i++ )
         {
-            data->left_samples.push_back(SAMPLE_SILENCE);
-            data->right_samples.push_back(SAMPLE_SILENCE);
+            channels ch = {
+                SAMPLE_SILENCE,
+                SAMPLE_SILENCE
+            };
+            data->samples.push_back(ch);
         }
     }
     else
     {
         for(int i=0; i<framesPerBuffer; i++ ){
-            data->left_samples.push_back(*rptr++);
-            data->right_samples.push_back(*rptr++);
+            channels ch = {
+                *rptr++,
+                *rptr++
+            };
+            data->samples.push_back(ch);
             // std::cout << wptr.left << " " << wptr.right << std::endl;
         }
     }
@@ -134,11 +145,22 @@ int main(){
             ImGui::NewFrame();
             ImGui::Begin("Test");
             if (ImPlot::BeginPlot("Test")) {
+
                 ImPlot::SetupAxisLimits(ImAxis_X1, 0, NUM_OF_SAMPLES);
                 ImPlot::SetupAxisLimits(ImAxis_Y1, -128, 127);
+                auto left = [](int index, void* ch) {
+                    auto sample = static_cast<channels *>(ch)[index];
+                    return ImPlotPoint(index, sample.left);
+                };
 
-                ImPlot::PlotLine("Left",data.left_samples.linearize(), data.left_samples.size());
-                ImPlot::PlotLine("Right",data.left_samples.linearize(), data.left_samples.size());
+                auto right =  [](int index, void* ch) {
+                    auto sample =  static_cast<channels *>(ch)[index];
+                    return ImPlotPoint(index, sample.right);
+                };
+                auto samples = data.samples.linearize();
+                ImPlot::PlotLineG("Left", left, samples , data.samples.size());
+                ImPlot::NextColormapColor();
+                ImPlot::PlotLineG("Right", right, samples, data.samples.size());
                 ImPlot::EndPlot();
             }
             ImGui::End();

@@ -11,8 +11,12 @@
 #define NUM_CHANNELS    (2)
 #define PA_SAMPLE_TYPE  paInt8
 #define SAMPLE_SILENCE  (0)
-#define throw_if_error(err) \
-    if(err != paNoError ) {throw std::runtime_error(#err "Error: " + std::string(Pa_GetErrorText( err ))) ;}
+#define throw_if_error(callback) \
+    { PaError err = (callback); \
+      if(err != paNoError ) { \
+        throw std::runtime_error("Error: " + std::string(Pa_GetErrorText( err ))) ; \
+      } \
+    };
 
 typedef int8_t SAMPLE;
 struct paTestData
@@ -72,8 +76,7 @@ int main(){
         /* From now on, recordedSamples is initialised. */
 
 
-        auto err = Pa_Initialize();
-        throw_if_error(err)
+        throw_if_error(Pa_Initialize());
         PaStreamParameters  inputParameters;
         inputParameters.device = Pa_GetDefaultInputDevice(); /* default input device */
         inputParameters.channelCount = NUM_CHANNELS;
@@ -84,7 +87,7 @@ int main(){
         /* Record some audio. -------------------------------------------- */
         PaStream*           stream;
         paTestData data;
-        err = Pa_OpenStream(
+        throw_if_error(Pa_OpenStream(
                   &stream,
                   &inputParameters,
                   nullptr,                  /* &outputParameters, */
@@ -92,26 +95,21 @@ int main(){
                   FRAMES_PER_BUFFER,
                   paClipOff,      /* we won't output out of range samples so don't bother clipping them */
                   recordCallback,
-                  &data );
-        throw_if_error(err);
+                  &data ));
 
-        err = Pa_StartStream( stream );
-        throw_if_error(err);
+        throw_if_error(Pa_StartStream( stream ));
         std::cout << "\n=== Now recording!! Please speak into the microphone. ===\n" << std::endl;
-        while( ( err = Pa_IsStreamActive( stream ) ) == 1 )
+        while(Pa_IsStreamActive( stream ) == 1)
         {
-            Pa_Sleep(150);
+            Pa_Sleep(100);
             aux->plot(x, data.left_samples , "b", x, data.right_samples, "r" );
         }
-        throw_if_error(err);
 
-        err = Pa_CloseStream( stream );
-        throw_if_error(err);
+        throw_if_error(Pa_CloseStream( stream ));
 
         /* Measure maximum peak amplitude. */
 
-        err = Pa_Terminate();
-        throw_if_error(err);
+        throw_if_error(Pa_Terminate());
         return 0;
     } catch (std::runtime_error &e)  {
         std::cerr << "An error occurred while using the portaudio stream" << std::endl;

@@ -1,4 +1,5 @@
 
+#include <complex>
 #include <iostream>
 #include <portaudio.h>
 #include <GLFW/glfw3.h>
@@ -28,6 +29,10 @@ typedef int8_t SAMPLE;
 struct channels {
     SAMPLE left;
     SAMPLE right;
+};
+
+struct meansqrt {
+    double left, right;
 };
 
 struct paTestData
@@ -74,6 +79,33 @@ static int recordCallback( const void *inputBuffer, void *,
 }
 
 void glfw_error_callback(int error, const char* description) { std::cerr << "GLFW Error " << error << ": " << description << std::endl; }
+
+meansqrt calculate_mean_sqrt(boost::circular_buffer<channels> *samples) {
+    double value_left = 0;
+    double value_right = 0;
+
+    for (auto sample: *samples) {
+
+        value_left += std::pow(sample.left, 2) + 1;
+        value_right += std::pow(sample.right, 2) + 1;
+    }
+    double n = samples->size();
+    value_left *= 1.0/ n;
+    value_right *= 1.0/ n;
+    return {std::sqrt(value_left), std::sqrt(value_right)};
+}
+
+double calculate_dBFS(boost::circular_buffer<channels> * samples) {
+
+    auto meansqrt = calculate_mean_sqrt(samples);
+    const auto value_left = std::log10(meansqrt.left / 127.0) * 20;
+    const auto value_right = std::log10(meansqrt.right / 127.0) * 20;
+    const double intensity_left = 1e-12 * std::pow(10, value_left/10.0);
+    const double intensity_right = 1e-12 * std::pow(10, value_right/10.0);
+    const double intensity = intensity_right + intensity_left;
+    return 10 * std::log10(intensity / 1e-12);
+
+};
 
 /*******************************************************************/
 int main(){
@@ -146,7 +178,7 @@ int main(){
             ImGui::Begin("Test");
             if (ImPlot::BeginPlot("Test")) {
 
-                ImPlot::SetupAxisLimits(ImAxis_X1, 0, NUM_OF_SAMPLES);
+                ImPlot::SetupAxisLimits(ImAxis_X1, 1300, NUM_OF_SAMPLES);
                 ImPlot::SetupAxisLimits(ImAxis_Y1, -128, 127);
                 auto left = [](int index, void* ch) {
                     auto sample = static_cast<channels *>(ch)[index];
@@ -157,7 +189,10 @@ int main(){
                     auto sample =  static_cast<channels *>(ch)[index];
                     return ImPlotPoint(index, sample.right);
                 };
+                auto dBFS = calculate_dBFS(&data.samples);
+                std::cout << "dBFS: " <<dBFS << std::endl;
                 auto samples = data.samples.linearize();
+
                 ImPlot::PlotLineG("Left", left, samples , data.samples.size());
                 ImPlot::NextColormapColor();
                 ImPlot::PlotLineG("Right", right, samples, data.samples.size());

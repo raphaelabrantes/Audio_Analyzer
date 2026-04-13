@@ -20,5 +20,9 @@ find_package(implot REQUIRED)
 find_package(imgui REQUIRED)
 INCLUDE_DIRECTORIES( ${Boost_INCLUDE_DIRS} )
 
-add_executable(noise_catcher main.cpp)
+add_executable(noise_catcher main.cpp
+        Plotter.cpp
+        Plotter.h
+        sample.h
+)
 target_link_libraries(noise_catcher PUBLIC portaudio m rt asound jack Threads::Threads Boost::headers glfw OpenGL::GL implot::implot imgui::imgui )

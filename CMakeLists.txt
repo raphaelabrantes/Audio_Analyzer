@@ -14,15 +14,20 @@ FetchContent_GetProperties(portaudio)
 if(NOT portaudio_POPULATED)
     FetchContent_MakeAvailable(portaudio)
 endif()
-find_package(Boost REQUIRED)
+find_package(Boost REQUIRED COMPONENTS program_options )
 find_package(OpenGL REQUIRED)
 find_package(implot REQUIRED)
 find_package(imgui REQUIRED)
+find_package(mailio CONFIG REQUIRED)
 INCLUDE_DIRECTORIES( ${Boost_INCLUDE_DIRS} )
+
 
 add_executable(noise_catcher main.cpp
         Plotter.cpp
         Plotter.h
         sample.h
+        MailSender.cpp
+        MailSender.h
 )
-target_link_libraries(noise_catcher PUBLIC portaudio m rt asound jack Threads::Threads Boost::headers glfw OpenGL::GL implot::implot imgui::imgui )
+
+target_link_libraries(noise_catcher PUBLIC portaudio m rt asound jack Threads::Threads Boost::headers glfw OpenGL::GL implot::implot imgui::imgui mailio::mailio Boost::program_options )

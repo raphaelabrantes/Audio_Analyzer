@@ -4,12 +4,20 @@
 #include <iostream>
 #include <boost/circular_buffer.hpp>
 #include <vector>
+#include <mailio/smtp.hpp>
+#include <boost/program_options.hpp>
+
+#include "MailSender.h"
 #include "Plotter.h"
+
 #define MINUTES 2
 
 
+std::chrono::time_point begin = std::chrono::steady_clock::now();
+bool mailsent = false;
 
-int main(){
+int main(int argc, char* argv[]){
+    MailSender mail_sender(argc, argv);
 
     try {
         Plotter plotter(1200, 800, "ImPlot Example");
@@ -38,17 +46,22 @@ int main(){
         throw_if_error(Pa_StartStream( stream ));
         std::cout << "\n=== Now recording!! Please speak into the microphone. ===\n" << std::endl;
         boost::circular_buffer<double> avg_dBFS {MINUTES};
-        auto start = std::chrono::system_clock::now();
+        auto start = std::chrono::steady_clock::now();
         while(Pa_IsStreamActive( stream ) == 1 && !plotter.should_close()) {
-            std::chrono::duration<double> elapsed_seconds = std::chrono::system_clock::now() - start;
+            std::chrono::duration<double> elapsed_seconds = std::chrono::steady_clock::now() - start;
             if (elapsed_seconds.count() > 5) {
                 avg_dBFS.push_back(calculate_dBFS(&data.samples));
                 auto mean = get_avg_dBFS(&avg_dBFS);
                 data.avg_dBs = mean;
-                if (mean > data.thresh_hold ) {
-                    //sendEmail();
+                std::chrono::duration<double> refresh_mail_timer = begin - std::chrono::steady_clock::now();
+                if (refresh_mail_timer.count() > 3600) {
+                    begin = std::chrono::steady_clock::now();
+                    mailsent = false;
                 }
-                start = std::chrono::system_clock::now();
+                if (mean > data.thresh_hold && mailsent == false) {
+                    mailsent = mail_sender.send_mail(data.thresh_hold, mean);
+                }
+                start = std::chrono::steady_clock::now();
 
             }
             plotter.update(&data);

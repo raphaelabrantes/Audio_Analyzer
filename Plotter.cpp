@@ -29,7 +29,7 @@ void Plotter::update(audio_track *data) const {
         ImPlot::PlotLineG("Left", left, samples , data->samples.size());
         ImPlot::NextColormapColor();
         ImPlot::PlotLineG("Right", right, samples, data->samples.size());
-        ImPlot::Annotation(0,-128 ,col,ImVec2(0,0),true,"dBFS: %.2f",  *&data->avg_dBs);
+        ImPlot::Annotation(0,-128 ,col,ImVec2(0,0),true,"dBFS: %.2f",  data->avg_dBs);
 
         ImPlot::EndPlot();
     }
